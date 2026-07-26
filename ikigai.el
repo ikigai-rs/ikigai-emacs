@@ -93,16 +93,18 @@ Builds `(invoke (quote VERB) \"URI\" \"n\" \"v\" ...)' so values with spaces are
 
 (defun ikigai-eval-dwim (arg)
   "Evaluate the region (or the current line) as an ikigai command; show the result.
-With a prefix ARG, insert the result into the buffer after point instead."
+The result is also pushed onto the kill ring, so \\[yank] pastes it anywhere.
+With a prefix ARG, insert the result into the buffer after point as well."
   (interactive "P")
   (let* ((cmd (string-trim
                (if (use-region-p)
                    (buffer-substring-no-properties (region-beginning) (region-end))
                  (thing-at-point 'line t))))
          (out (ikigai-eval cmd)))
-    (if arg
-        (save-excursion (end-of-line) (insert "\n" out))
-      (message "%s" out))
+    (kill-new out)
+    (when arg
+      (save-excursion (end-of-line) (insert "\n" out)))
+    (message "%s%s" out (if arg "" "  (copied)"))
     out))
 
 ;;; --- meeting scheduling -----------------------------------------------------

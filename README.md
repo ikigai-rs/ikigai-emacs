@@ -28,8 +28,9 @@ Requires the `ikigai` CLI on your `exec-path`. Clone and load:
   overrides. **Run it where the Zoom credentials live** (the schedule call reads them from the
   keystore).
 - **`ikigai-eval-dwim`** — evaluate the region (or the current line) as an ikigai command; the result
-  goes to the echo area, or `C-u` inserts it after point. E.g. a line reading
-  `describe urn:meeting:zoom:schedule` → the endpoint's self-description, inline.
+  goes to the echo area *and* onto the kill ring (so `C-y` pastes it anywhere), or `C-u` also inserts
+  it after point. E.g. a line reading `describe urn:meeting:zoom:schedule` → the endpoint's
+  self-description, inline.
 
   Quick grammar (the kernel tells you if you get it wrong): a **template** parameter goes *in the
   IRI* (`urn:personal:availability:today`, `…:2026-08`); a **by-value** arg is *space-separated*
