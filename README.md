@@ -29,9 +29,19 @@ Requires the `ikigai` CLI on your `exec-path`. Clone and load:
   keystore).
 - **`ikigai-eval-dwim`** — evaluate the region (or the current line) as an ikigai command; the result
   goes to the echo area, or `C-u` inserts it after point. E.g. a line reading
-  `source urn:personal:availability:week` → your freebusy, inline. (Template endpoints capture their
-  parameter *in the IRI* — `…:today`, `…:2026-08` — while by-value args are `key=value`; the kernel
-  tells you which if you get it wrong.)
+  `describe urn:meeting:zoom:schedule` → the endpoint's self-description, inline.
+
+  Quick grammar (the kernel tells you if you get it wrong): a **template** parameter goes *in the
+  IRI* (`urn:personal:availability:today`, `…:2026-08`); a **by-value** arg is *space-separated*
+  `key=value` (`source urn:fn:toUpper in=hello`) — **not** `?key=value` (the `?k=v` form is only for
+  compose contexts like `with=…?as=text/turtle`).
+
+  **Note on calendar/TCC-gated resources.** macOS attributes calendar access to the *launching* app,
+  so an `ikigai` spawned by Emacs runs under Emacs's (absent) grant, not the daemon's — `source
+  urn:personal:availability:week` will report "calendar access was denied." Resolve those *through the
+  daemon's* freebusy server instead: mount it (`--mount urn:personal:=quic://localhost:4444 --cert-dir
+  ~/.config/ikigai/quic/calendar`), which holds the grant. Keychain-backed resources (Zoom scheduling)
+  are unaffected — they key on the signing identity, not the launcher.
 
 ## Building blocks (for your own commands)
 
