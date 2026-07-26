@@ -46,14 +46,18 @@ Requires the `ikigai` CLI on your `exec-path`. Clone and load:
 
   ```elisp
   (setq ikigai-mounts
-        '((:prefix "urn:personal:"
+        '((:prefix "urn:personal:" :alias "urn:cal:"
            :target "quic://localhost:4444"
            :cert-dir "~/.config/ikigai/quic/calendar")))
   ```
 
-  Keychain-backed resources (Zoom scheduling) need no mount — they key on the signing identity, not
-  the launcher. (Prefix routing is also the seam URI completion will grow from: the daemon already
-  knows its catalog.)
+  The `:alias` is load-bearing: a mount rewrites `<mount-prefix>rest` → `urn:rest` on the remote, so
+  it can't win a prefix the *local* kernel already serves (it serves `urn:personal:`). The client
+  mounts the remote at the non-colliding `:alias` and rewrites `urn:personal:` → `urn:cal:` on the
+  wire, so you keep writing canonical `urn:personal:…` in buffers (errors echo the alias — that's the
+  wire address). Keychain-backed resources (Zoom scheduling) need no mount — they key on the signing
+  identity, not the launcher. (Prefix routing is also the seam URI completion will grow from: the
+  daemon already knows its catalog.)
 
 ## Building blocks (for your own commands)
 

@@ -28,35 +28,63 @@
 
 (defcustom ikigai-mounts nil
   "Remote kernels to compose into every `ikigai-eval' call.
-A list of plists, each `(:prefix PFX :target TGT :cert-dir DIR)', becoming
-`--mount PFX=TGT --cert-dir DIR' on the ikigai command line.  Routing a
-prefix to a daemon that holds the resource lets Emacs reach it through that
-daemon's grants and cache instead of the (grant-less, cold) process Emacs
-spawns.  On macOS calendar access is pinned to the launching app, so
-`urn:personal:*' must resolve through the freebusy daemon, e.g.:
+A list of plists, each `(:prefix PFX :target TGT :cert-dir DIR :alias ALIAS)'.
+Routing a prefix to a daemon that holds the resource lets Emacs reach it
+through that daemon's grants and cache instead of the (grant-less, cold)
+process Emacs spawns.  On macOS calendar access is pinned to the launching
+app, so `urn:personal:*' must resolve through the freebusy daemon.
+
+PFX is the canonical prefix you write in buffers.  TARGET/CERT-DIR become
+`--mount …=TARGET --cert-dir DIR'.
+
+ALIAS handles the collision case: a mount rewrites `<mount-prefix>rest' to
+`urn:rest' on the remote, so a mount cannot win a prefix the LOCAL kernel
+already serves (it does serve `urn:personal:').  Set ALIAS to a wire prefix
+the local kernel does NOT serve; the remote is mounted there and this client
+rewrites PFX to ALIAS on the wire, so you keep writing canonical PFX.
+Errors will echo the ALIAS form — that is the wire address.  (When the
+kernel grows override-mounts this field goes away.)  Example:
 
   (setq ikigai-mounts
-        \\='((:prefix \"urn:personal:\"
+        \\='((:prefix \"urn:personal:\" :alias \"urn:cal:\"
             :target \"quic://localhost:4444\"
             :cert-dir \"~/.config/ikigai/quic/calendar\")))"
   :type '(repeat
           (plist :key-type symbol :value-type string
-                 :options ((:prefix string) (:target string) (:cert-dir directory))))
+                 :options ((:prefix string) (:alias string)
+                           (:target string) (:cert-dir directory))))
   :group 'ikigai)
 
 ;;; --- the wrapper: call the kernel -------------------------------------------
 
 (defun ikigai--mount-args ()
-  "Build the `--mount'/`--cert-dir' flags from `ikigai-mounts'."
+  "Build the `--mount'/`--cert-dir' flags from `ikigai-mounts'.
+Each mount is bound at its :alias when set (so it does not collide with a
+locally-served :prefix), else at :prefix."
   (apply #'append
          (mapcar (lambda (m)
                    (append
                     (list "--mount" (format "%s=%s"
-                                            (plist-get m :prefix)
+                                            (or (plist-get m :alias)
+                                                (plist-get m :prefix))
                                             (plist-get m :target)))
                     (when-let ((dir (plist-get m :cert-dir)))
                       (list "--cert-dir" (expand-file-name dir)))))
                  ikigai-mounts)))
+
+(defun ikigai--apply-aliases (command)
+  "Rewrite each aliased mount's canonical :prefix to its wire :alias in COMMAND.
+The remote maps `<alias>rest'->`urn:rest', so canonical `urn:personal:X' must
+go out as `<alias>personal:X' — i.e. :prefix with its `urn:' swapped for :alias."
+  (dolist (m ikigai-mounts command)
+    (let ((prefix (plist-get m :prefix))
+          (alias (plist-get m :alias)))
+      (when (and prefix alias (string-prefix-p "urn:" prefix))
+        (setq command
+              (replace-regexp-in-string
+               (regexp-quote prefix)
+               (concat alias (substring prefix (length "urn:")))
+               command t t))))))
 
 (defun ikigai--quote (s)
   "Escape S as an ikigai/Steel string literal (quotes and backslashes)."
@@ -66,7 +94,8 @@ spawns.  On macOS calendar access is pinned to the launching app, so
   "Run ikigai COMMAND (a resolution string or a Lisp form) via `ikigai -c'.
 Return trimmed stdout on success; signal `user-error' with stderr on failure.
 Cache tags (`[uncacheable]' etc.) go to stderr, so stdout stays clean."
-  (let ((errfile (make-temp-file "ikigai-err")))
+  (let ((errfile (make-temp-file "ikigai-err"))
+        (command (ikigai--apply-aliases command)))
     (unwind-protect
         (with-temp-buffer
           (let ((status (apply #'call-process ikigai-program nil
