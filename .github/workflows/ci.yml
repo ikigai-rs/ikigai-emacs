@@ -1,0 +1,27 @@
+# CI for ikigai-emacs — byte-compile the package (catches undefined functions, bad
+# forms, and the accidental variable that shadows a macro). Org is bundled with Emacs,
+# so `(require 'org)` / `(require 'org-element)` resolve without extra deps.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  byte-compile:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        emacs_version: ['29.4', '30.1']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs_version }}
+      - name: byte-compile
+        run: |
+          emacs -Q --batch \
+            --eval "(require 'org)" \
+            --eval "(require 'org-element)" \
+            -f batch-byte-compile ikigai.el
