@@ -38,10 +38,21 @@ Requires the `ikigai` CLI on your `exec-path`. Clone and load:
 
   **Note on calendar/TCC-gated resources.** macOS attributes calendar access to the *launching* app,
   so an `ikigai` spawned by Emacs runs under Emacs's (absent) grant, not the daemon's — `source
-  urn:personal:availability:week` will report "calendar access was denied." Resolve those *through the
-  daemon's* freebusy server instead: mount it (`--mount urn:personal:=quic://localhost:4444 --cert-dir
-  ~/.config/ikigai/quic/calendar`), which holds the grant. Keychain-backed resources (Zoom scheduling)
-  are unaffected — they key on the signing identity, not the launcher.
+  urn:personal:availability:week` would otherwise report "calendar access was denied." Route those
+  *through the daemon* with `ikigai-mounts`, which composes a remote kernel at a URN prefix on every
+  call — so the freebusy daemon (which holds the grant *and* caches the result) answers, not the cold
+  local process:
+
+  ```elisp
+  (setq ikigai-mounts
+        '((:prefix "urn:personal:"
+           :target "quic://localhost:4444"
+           :cert-dir "~/.config/ikigai/quic/calendar")))
+  ```
+
+  Keychain-backed resources (Zoom scheduling) need no mount — they key on the signing identity, not
+  the launcher. (Prefix routing is also the seam URI completion will grow from: the daemon already
+  knows its catalog.)
 
 ## Building blocks (for your own commands)
 

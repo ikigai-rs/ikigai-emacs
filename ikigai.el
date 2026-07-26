@@ -26,7 +26,37 @@
   "Default meeting length when a heading's timestamp carries no end time."
   :type 'integer :group 'ikigai)
 
+(defcustom ikigai-mounts nil
+  "Remote kernels to compose into every `ikigai-eval' call.
+A list of plists, each `(:prefix PFX :target TGT :cert-dir DIR)', becoming
+`--mount PFX=TGT --cert-dir DIR' on the ikigai command line.  Routing a
+prefix to a daemon that holds the resource lets Emacs reach it through that
+daemon's grants and cache instead of the (grant-less, cold) process Emacs
+spawns.  On macOS calendar access is pinned to the launching app, so
+`urn:personal:*' must resolve through the freebusy daemon, e.g.:
+
+  (setq ikigai-mounts
+        \\='((:prefix \"urn:personal:\"
+            :target \"quic://localhost:4444\"
+            :cert-dir \"~/.config/ikigai/quic/calendar\")))"
+  :type '(repeat
+          (plist :key-type symbol :value-type string
+                 :options ((:prefix string) (:target string) (:cert-dir directory))))
+  :group 'ikigai)
+
 ;;; --- the wrapper: call the kernel -------------------------------------------
+
+(defun ikigai--mount-args ()
+  "Build the `--mount'/`--cert-dir' flags from `ikigai-mounts'."
+  (apply #'append
+         (mapcar (lambda (m)
+                   (append
+                    (list "--mount" (format "%s=%s"
+                                            (plist-get m :prefix)
+                                            (plist-get m :target)))
+                    (when-let ((dir (plist-get m :cert-dir)))
+                      (list "--cert-dir" (expand-file-name dir)))))
+                 ikigai-mounts)))
 
 (defun ikigai--quote (s)
   "Escape S as an ikigai/Steel string literal (quotes and backslashes)."
@@ -39,8 +69,9 @@ Cache tags (`[uncacheable]' etc.) go to stderr, so stdout stays clean."
   (let ((errfile (make-temp-file "ikigai-err")))
     (unwind-protect
         (with-temp-buffer
-          (let ((status (call-process ikigai-program nil (list (current-buffer) errfile)
-                                      nil "-c" command)))
+          (let ((status (apply #'call-process ikigai-program nil
+                               (list (current-buffer) errfile) nil
+                               (append (ikigai--mount-args) (list "-c" command)))))
             (if (eq status 0)
                 (string-trim (buffer-string))
               (user-error "ikigai: %s"
