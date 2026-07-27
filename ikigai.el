@@ -15,6 +15,8 @@
 (require 'org-element)
 (require 'json)
 (require 'subr-x)
+(require 'comint)
+(require 'ansi-color)
 
 (defgroup ikigai nil "Talk to the ikigai kernel from Emacs." :group 'tools)
 
@@ -320,6 +322,45 @@ so re-sending updates the same event rather than duplicating it."
                            "to" addr "subject" subject "content" body "ics" ics))
           (message "Invite sent to %d attendee(s): %s"
                    (length attendees) (string-join attendees ", ")))))))
+
+;;; --- interactive REPL (comint over `ikigai --plain') ------------------------
+
+(defvar ikigai-repl-prompt-regexp "^ikigai> "
+  "Regexp matching the prompt the `ikigai --plain' line REPL prints.")
+
+(defcustom ikigai-repl-buffer-name "*ikigai*"
+  "Buffer name for `ikigai-repl'."
+  :type 'string :group 'ikigai)
+
+(define-derived-mode ikigai-repl-mode comint-mode "ikigai"
+  "Major mode for an interactive ikigai REPL, comint over `ikigai --plain'.
+The plain line REPL reads whole lines from stdin (no in-process line editor),
+so Emacs does the editing and history; `\\[comint-previous-input]' /
+`\\[comint-next-input]' cycle input as usual."
+  (setq-local comint-prompt-regexp ikigai-repl-prompt-regexp)
+  (setq-local comint-prompt-read-only t)
+  ;; Shaken out empirically (batch comint against `ikigai --plain'): Emacs's pty
+  ;; does NOT echo this process's input, so comint's own inserted copy is the only
+  ;; one — no double-echo. `nil` is the default; set explicitly to record that it
+  ;; was checked, and because `t` here would risk clipping output that happened to
+  ;; look like the input.
+  (setq-local comint-process-echoes nil)
+  (setq-local comint-use-prompt-regexp nil)  ; field-based prompt handling
+  ;; The `clear` command and any coloured output arrive as ANSI; render it.
+  (add-hook 'comint-output-filter-functions #'ansi-color-process-output nil t))
+
+;;;###autoload
+(defun ikigai-repl ()
+  "Open (or switch to) an interactive ikigai REPL buffer.
+Runs `ikigai --plain' under comint, inheriting any `ikigai-mounts' so the
+REPL resolves the same composed resources your one-shot commands do."
+  (interactive)
+  (let ((buf (get-buffer-create ikigai-repl-buffer-name)))
+    (unless (comint-check-proc buf)
+      (apply #'make-comint-in-buffer "ikigai" buf ikigai-program nil
+             (append (ikigai--mount-args) (list "--plain")))
+      (with-current-buffer buf (ikigai-repl-mode)))
+    (pop-to-buffer buf)))
 
 (provide 'ikigai)
 ;;; ikigai.el ends here

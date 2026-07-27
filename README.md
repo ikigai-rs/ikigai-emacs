@@ -65,6 +65,11 @@ Requires the `ikigai` CLI on your `exec-path`. Clone and load:
   wire address). Keychain-backed resources (Zoom scheduling) need no mount — they key on the signing
   identity, not the launcher. (Prefix routing is also the seam URI completion will grow from: the
   daemon already knows its catalog.)
+- **`ikigai-repl`** — an interactive REPL buffer, [comint](https://www.gnu.org/software/emacs/manual/html_node/emacs/Interactive-Shell.html)
+  over `ikigai --plain` (the line REPL, not the full-screen TUI). Full input history (`M-p`/`M-n`),
+  scrollback, and a real `ikigai>` prompt; it inherits your `ikigai-mounts`, so the session resolves
+  the same composed resources your one-shot commands do. One line per command (the line REPL reads a
+  line at a time), so keep multi-line Lisp forms on one line.
 
 ## Building blocks (for your own commands)
 
