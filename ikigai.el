@@ -190,8 +190,8 @@ URL into the `:URL:' drawer (which ikigai-org emits as `ical:description',
 so it rides to Brian-Busy) and the passcode into `:ZOOM_PASSCODE:'.
 With a prefix arg, prompt for MINUTES.
 
-Attendees are RECORDED, not yet emailed; sending them the link is a
-later slice (it needs an ikigai invite-send resource)."
+Attendees are RECORDED here; email them a calendar invite with
+`ikigai-org-email-invite' once the Zoom is scheduled."
   (interactive (list (when current-prefix-arg
                        (read-number "Minutes: " ikigai-default-meeting-minutes))))
   (save-excursion
@@ -212,8 +212,114 @@ later slice (it needs an ikigai invite-send resource)."
         (org-entry-put (point) "ZOOM_PASSCODE" pass))
       (message "Zoom scheduled: %s%s" join
                (if (string-empty-p attendees) ""
-                 (format "  (attendees noted, invites not sent: %s)" attendees)))
+                 (format "  (attendees noted — M-x ikigai-org-email-invite to send: %s)" attendees)))
       join)))
+
+;;; --- email a calendar invite (iMIP) to the attendees -----------------------
+
+(defcustom ikigai-organizer-email "brian@bosatsu.net"
+  "The ORGANIZER address on invites this client sends."
+  :type 'string :group 'ikigai)
+
+(defcustom ikigai-organizer-name "Brian Sletten"
+  "The ORGANIZER display name on invites this client sends."
+  :type 'string :group 'ikigai)
+
+(defun ikigai--ics-escape (s)
+  "Escape S for an iCalendar TEXT value (RFC 5545 §3.3.11): \\ , ; and newlines."
+  (replace-regexp-in-string
+   "\n" "\\\\n"
+   (replace-regexp-in-string "[\\,;]" "\\\\\\&" (or s ""))))
+
+(defun ikigai--ics-fold (line)
+  "Fold LINE to <=75 chars per RFC 5545 §3.1; continuations begin with a space.
+Char-based, which is octet-exact for the ASCII URLs/emails/text here and never
+splits a codepoint; any conformant parser rejoins the CRLF-space continuations."
+  (if (<= (length line) 75) line
+    (let ((parts nil) (i 0) (n (length line)) (limit 75))
+      (while (< i n)
+        (let ((end (min n (+ i limit))))
+          (push (substring line i end) parts)
+          (setq i end limit 74)))          ; continuations carry a leading space → 74 content
+      (mapconcat #'identity (nreverse parts) "\r\n "))))
+
+(defun ikigai--ics-invite (uid topic start minutes join pass attendees)
+  "Build an RFC 5545 VCALENDAR (METHOD:REQUEST) for the meeting.
+START is UTC ISO-8601; MINUTES the duration; ATTENDEES a list of addresses.
+The Zoom link rides as both LOCATION/URL and an RFC 7986 CONFERENCE property."
+  (let* ((start-time (date-to-time start))
+         (fmt (lambda (tm) (format-time-string "%Y%m%dT%H%M%SZ" tm t)))
+         (desc (concat "Join Zoom: " join
+                       (if (and pass (not (string-empty-p pass)))
+                           (concat "\nPasscode: " pass) "")))
+         (lines (append
+                 (list "BEGIN:VCALENDAR"
+                       "VERSION:2.0"
+                       "PRODID:-//ikigai-emacs//meeting//EN"
+                       "METHOD:REQUEST"
+                       "BEGIN:VEVENT"
+                       (concat "UID:" uid)
+                       (concat "DTSTAMP:" (funcall fmt nil))
+                       (concat "DTSTART:" (funcall fmt start-time))
+                       (concat "DTEND:" (funcall fmt (time-add start-time (* minutes 60))))
+                       (concat "SUMMARY:" (ikigai--ics-escape topic))
+                       (concat "DESCRIPTION:" (ikigai--ics-escape desc))
+                       (concat "LOCATION:" (ikigai--ics-escape join))
+                       (concat "URL:" join)
+                       (concat "ORGANIZER;CN=" ikigai-organizer-name
+                               ":mailto:" ikigai-organizer-email)
+                       (concat "CONFERENCE;VALUE=URI;FEATURE=VIDEO;LABEL=Zoom Meeting:" join))
+                 (mapcar (lambda (a)
+                           (concat "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;"
+                                   "RSVP=TRUE:mailto:" a))
+                         attendees)
+                 (list "END:VEVENT" "END:VCALENDAR"))))
+    (mapconcat #'ikigai--ics-fold lines "\r\n")))
+
+(defun ikigai--invite-body (topic start join pass)
+  "Plain-text alternative body for the invite (clients that ignore the .ics)."
+  (concat topic "\n\n"
+          "When: " start " (UTC)\n"
+          "Join Zoom: " join "\n"
+          (if (and pass (not (string-empty-p pass))) (concat "Passcode: " pass "\n") "")
+          "\nA calendar invitation is attached — accept it to add this to your calendar.\n"))
+
+;;;###autoload
+(defun ikigai-org-email-invite ()
+  "Email the org entry's `:ATTENDEES:' an iMIP calendar invite for its Zoom.
+The entry must already carry a `:URL:' join link (from
+`ikigai-org-schedule-zoom'). Sends one METHOD:REQUEST invite per attendee
+via `urn:email:send', carrying the VCALENDAR as the `ics' argument so a mail
+client shows an add-to-calendar / RSVP card.
+
+Delivery needs a reachable mailer: if THIS machine has no local SMTP, route
+`urn:email:' to one that does via `ikigai-mounts' (same pattern as the
+calendar mount). The event UID is the entry's org `:ID:' (created if absent),
+so re-sending updates the same event rather than duplicating it."
+  (interactive)
+  (save-excursion
+    (org-back-to-heading t)
+    (let* ((topic (org-get-heading t t t t))
+           (sched (ikigai--org-when))
+           (start (car sched))
+           (minutes (or (cdr sched) ikigai-default-meeting-minutes))
+           (join (org-entry-get (point) "URL"))
+           (pass (org-entry-get (point) "ZOOM_PASSCODE"))
+           (attendees (split-string (or (org-entry-get (point) "ATTENDEES") "") "[, ]+" t)))
+      (unless (and join (not (string-empty-p join)))
+        (user-error "No Zoom link in :URL: — run ikigai-org-schedule-zoom first"))
+      (unless attendees
+        (user-error "No :ATTENDEES: on this heading to invite"))
+      (when (yes-or-no-p (format "Email an invite to %d attendee(s): %s? "
+                                 (length attendees) (string-join attendees ", ")))
+        (let ((ics (ikigai--ics-invite (org-id-get-create) topic start minutes join pass attendees))
+              (body (ikigai--invite-body topic start join pass))
+              (subject (concat "Invitation: " topic)))
+          (dolist (addr attendees)
+            (ikigai-invoke 'sink "urn:email:send"
+                           "to" addr "subject" subject "content" body "ics" ics))
+          (message "Invite sent to %d attendee(s): %s"
+                   (length attendees) (string-join attendees ", ")))))))
 
 (provide 'ikigai)
 ;;; ikigai.el ends here

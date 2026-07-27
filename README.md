@@ -27,6 +27,13 @@ Requires the `ikigai` CLI on your `exec-path`. Clone and load:
   timestamp (`<… 12:00-13:00>` → 60 min), else `ikigai-default-meeting-minutes` (30); a prefix arg
   overrides. **Run it where the Zoom credentials live** (the schedule call reads them from the
   keystore).
+- **`ikigai-org-email-invite`** — once a heading has a Zoom (`:URL:` join link) and `:ATTENDEES:`,
+  email each attendee a proper **iMIP calendar invite** (`METHOD:REQUEST`) via `urn:email:send`,
+  carrying an RFC 5545 `VCALENDAR` as the `ics` argument — so their mail client shows an
+  add-to-calendar / RSVP card, with the join link as an RFC 7986 `CONFERENCE` property. The event
+  `UID` is the heading's org `:ID:` (created if absent), so re-sending *updates* the meeting rather
+  than duplicating it. Delivery needs a reachable mailer: if this machine has no local SMTP, route
+  `urn:email:` to one that does via `ikigai-mounts` (same pattern as the calendar mount).
 - **`ikigai-eval-dwim`** — evaluate the region (or the current line) as an ikigai command; the result
   goes to the echo area *and* onto the kill ring (so `C-y` pastes it anywhere), or `C-u` also inserts
   it after point. E.g. a line reading `describe urn:meeting:zoom:schedule` → the endpoint's
@@ -69,8 +76,9 @@ Requires the `ikigai` CLI on your `exec-path`. Clone and load:
 
 ## Status
 
-Early, and useful. First feature: ad-hoc Zoom scheduling from org (meetings not booked through the
-website). Next: emailing the attendees an invite with the link; contacts autocomplete for their
-addresses. Part of the ikigai ecosystem — [ikigai-rs.dev](https://ikigai-rs.dev).
+Early, and useful. Working: ad-hoc Zoom scheduling from org (meetings not booked through the
+website), and emailing the attendees a calendar invite. Next: contacts autocomplete for attendee
+addresses; URI completion off the mounted daemon's catalog. Part of the ikigai ecosystem —
+[ikigai-rs.dev](https://ikigai-rs.dev).
 
 License: MIT OR Apache-2.0
