@@ -41,7 +41,10 @@ across machines.  When nil, commands run embedded (a cold kernel) composing
 
 (defcustom ikigai-mounts nil
   "Remote kernels to compose into every `ikigai-eval' call.
-A list of plists, each `(:prefix PFX :target TGT :cert-dir DIR :alias ALIAS)'.
+A list of plists, each `(:prefix PFX :target TGT :cert-dir DIR :alias ALIAS
+:mode MODE)'.  TGT may be `peer:NAME' to find that peer on the local network by
+mDNS instead of naming an address.  MODE is nil/`alias' (default), `override' or
+`prefer' — see `ikigai--mount-flag'.
 Routing a prefix to a daemon that holds the resource lets Emacs reach it
 through that daemon's grants and cache instead of the (grant-less, cold)
 process Emacs spawns.  On macOS calendar access is pinned to the launching
@@ -70,19 +73,41 @@ kernel grows override-mounts this field goes away.)  Example:
 
 ;;; --- the wrapper: call the kernel -------------------------------------------
 
+(defun ikigai--mount-flag (mount)
+  "The CLI flag for MOUNT: `--mount', `--override' or `--prefer'.
+
+`:mode' says how the mount relates to the local namespace, matching the CLI:
+
+  nil / `alias'  the prefix is a local ALIAS for a remote namespace (rewritten,
+                 tried AFTER local) — the default, and what `:alias' is for.
+  `override'     the SAME namespace served remotely: IRIs forward unchanged and
+                 win over local.  If the peer is unreachable the call FAILS —
+                 you asked for that machine.
+  `prefer'       like `override', but falls back to the LOCAL binding when the
+                 peer is unreachable: use plasma's inference when plasma is
+                 around, this machine when it is not."
+  (pcase (plist-get mount :mode)
+    ('override "--override")
+    ('prefer "--prefer")
+    (_ "--mount")))
+
 (defun ikigai--mount-args ()
-  "Build the `--mount'/`--cert-dir' flags from `ikigai-mounts'.
-Each mount is bound at its :alias when set (so it does not collide with a
-locally-served :prefix), else at :prefix."
+  "Build the mount flags from `ikigai-mounts'.
+An alias mount is bound at its :alias when set (so it does not collide with a
+locally-served :prefix), else at :prefix.  An override/prefer mount always uses
+:prefix — forwarding IRIs unchanged is the point of it, so rewriting them would
+defeat it."
   (apply #'append
          (mapcar (lambda (m)
-                   (append
-                    (list "--mount" (format "%s=%s"
-                                            (or (plist-get m :alias)
-                                                (plist-get m :prefix))
-                                            (plist-get m :target)))
-                    (when-let ((dir (plist-get m :cert-dir)))
-                      (list "--cert-dir" (expand-file-name dir)))))
+                   (let* ((flag (ikigai--mount-flag m))
+                          (alias (plist-get m :alias))
+                          (at (if (string= flag "--mount")
+                                  (or alias (plist-get m :prefix))
+                                (plist-get m :prefix))))
+                     (append
+                      (list flag (format "%s=%s" at (plist-get m :target)))
+                      (when-let ((dir (plist-get m :cert-dir)))
+                        (list "--cert-dir" (expand-file-name dir))))))
                  ikigai-mounts)))
 
 (defun ikigai--transport-args ()
