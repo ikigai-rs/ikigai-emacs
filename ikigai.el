@@ -342,6 +342,39 @@ so re-sending updates the same event rather than duplicating it."
           (message "Invite sent to %d attendee(s): %s"
                    (length attendees) (string-join attendees ", ")))))))
 
+;;; --- generated aliases (named verbs over the manifold) ----------------------
+
+(defcustom ikigai-aliases-file (locate-user-emacs-file "ikigai-aliases.el")
+  "Where `ikigai-refresh-aliases' writes the generated alias definitions."
+  :type 'file :group 'ikigai)
+
+(defun ikigai-refresh-aliases ()
+  "Regenerate elisp aliases from the kernel's manifold, then load them.
+
+Writes one function per resource THIS capability may invoke, with the
+arguments that resource declares: `(ikigai-fn-toUpper \"hi\")' rather than a
+hand-written wrapper.  They are GENERATED from the live manifold, so they
+cannot drift from what the kernel accepts, and a newly bound endpoint gets a
+function the next time you run this.
+
+The set reflects whichever kernel `ikigai-connect' / `ikigai-mounts' point at,
+so running this after changing transport gives you that host's surface.
+Requires `urn:cap:kernel:inspect': reading the manifold is inspection."
+  (interactive)
+  (let ((elisp (ikigai-eval "source urn:lisp:aliases as=text/x-emacs-lisp")))
+    (with-temp-file ikigai-aliases-file
+      (insert elisp)
+      ;; A trailing newline, so the file is a well-formed text file whatever the
+      ;; representation happened to end with.
+      (unless (string-suffix-p "\n" elisp)
+        (insert "\n")))
+    (load ikigai-aliases-file nil t)
+    (message "ikigai: %d aliases loaded from %s"
+             (with-temp-buffer
+               (insert elisp)
+               (count-matches "^(defun " (point-min) (point-max)))
+             (abbreviate-file-name ikigai-aliases-file))))
+
 ;;; --- interactive REPL (comint over `ikigai --plain') ------------------------
 
 (defvar ikigai-repl-prompt-regexp "^ikigai> "
