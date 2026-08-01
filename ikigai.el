@@ -24,6 +24,17 @@
   "The ikigai CLI executable (found on `exec-path')."
   :type 'string :group 'ikigai)
 
+(defcustom ikigai-connect nil
+  "If non-nil, an IPC socket path of a running `ikigai serve' host to talk to.
+When set, `ikigai-eval'/`ikigai-repl' prepend `--connect PATH' and do NOT pass
+`--mount' — a connected host owns its own mounts.  So a machine's transport and
+topology are a property of that host, and this Emacs config stays identical
+across machines.  When nil, commands run embedded (a cold kernel) composing
+`ikigai-mounts'."
+  :type '(choice (const :tag "Embedded (use ikigai-mounts)" nil)
+                 (file :tag "IPC socket of a serve host"))
+  :group 'ikigai)
+
 (defcustom ikigai-default-meeting-minutes 30
   "Default meeting length when a heading's timestamp carries no end time."
   :type 'integer :group 'ikigai)
@@ -74,6 +85,14 @@ locally-served :prefix), else at :prefix."
                       (list "--cert-dir" (expand-file-name dir)))))
                  ikigai-mounts)))
 
+(defun ikigai--transport-args ()
+  "Transport flags: `--connect' to a host when `ikigai-connect' is set, else the
+embedded `--mount' flags from `ikigai-mounts'.  A connected host owns its mounts,
+so the two are mutually exclusive by design."
+  (if ikigai-connect
+      (list "--connect" (expand-file-name ikigai-connect))
+    (ikigai--mount-args)))
+
 (defun ikigai--apply-aliases (command)
   "Rewrite each aliased mount's canonical :prefix to its wire :alias in COMMAND.
 The remote maps `<alias>rest'->`urn:rest', so canonical `urn:personal:X' must
@@ -102,7 +121,7 @@ Cache tags (`[uncacheable]' etc.) go to stderr, so stdout stays clean."
         (with-temp-buffer
           (let ((status (apply #'call-process ikigai-program nil
                                (list (current-buffer) errfile) nil
-                               (append (ikigai--mount-args) (list "-c" command)))))
+                               (append (ikigai--transport-args) (list "-c" command)))))
             (if (eq status 0)
                 (string-trim (buffer-string))
               (user-error "ikigai: %s"
@@ -323,6 +342,39 @@ so re-sending updates the same event rather than duplicating it."
           (message "Invite sent to %d attendee(s): %s"
                    (length attendees) (string-join attendees ", ")))))))
 
+;;; --- generated aliases (named verbs over the manifold) ----------------------
+
+(defcustom ikigai-aliases-file (locate-user-emacs-file "ikigai-aliases.el")
+  "Where `ikigai-refresh-aliases' writes the generated alias definitions."
+  :type 'file :group 'ikigai)
+
+(defun ikigai-refresh-aliases ()
+  "Regenerate elisp aliases from the kernel's manifold, then load them.
+
+Writes one function per resource THIS capability may invoke, with the
+arguments that resource declares: `(ikigai-fn-toUpper \"hi\")' rather than a
+hand-written wrapper.  They are GENERATED from the live manifold, so they
+cannot drift from what the kernel accepts, and a newly bound endpoint gets a
+function the next time you run this.
+
+The set reflects whichever kernel `ikigai-connect' / `ikigai-mounts' point at,
+so running this after changing transport gives you that host's surface.
+Requires `urn:cap:kernel:inspect': reading the manifold is inspection."
+  (interactive)
+  (let ((elisp (ikigai-eval "source urn:lisp:aliases as=text/x-emacs-lisp")))
+    (with-temp-file ikigai-aliases-file
+      (insert elisp)
+      ;; A trailing newline, so the file is a well-formed text file whatever the
+      ;; representation happened to end with.
+      (unless (string-suffix-p "\n" elisp)
+        (insert "\n")))
+    (load ikigai-aliases-file nil t)
+    (message "ikigai: %d aliases loaded from %s"
+             (with-temp-buffer
+               (insert elisp)
+               (count-matches "^(defun " (point-min) (point-max)))
+             (abbreviate-file-name ikigai-aliases-file))))
+
 ;;; --- interactive REPL (comint over `ikigai --plain') ------------------------
 
 (defvar ikigai-repl-prompt-regexp "^ikigai> "
@@ -358,7 +410,7 @@ REPL resolves the same composed resources your one-shot commands do."
   (let ((buf (get-buffer-create ikigai-repl-buffer-name)))
     (unless (comint-check-proc buf)
       (apply #'make-comint-in-buffer "ikigai" buf ikigai-program nil
-             (append (ikigai--mount-args) (list "--plain")))
+             (append (ikigai--transport-args) (list "--plain")))
       (with-current-buffer buf (ikigai-repl-mode)))
     (pop-to-buffer buf)))
 
