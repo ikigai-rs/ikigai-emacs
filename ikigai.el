@@ -342,6 +342,39 @@ so re-sending updates the same event rather than duplicating it."
           (message "Invite sent to %d attendee(s): %s"
                    (length attendees) (string-join attendees ", ")))))))
 
+(defun ikigai--form-before-point ()
+  "Read the Elisp form ending at point."
+  (save-excursion
+    (let ((end (point)))
+      (backward-sexp)
+      (car (read-from-string (buffer-substring-no-properties (point) end))))))
+
+(defun ikigai-eval-elisp-dwim (arg)
+  "Evaluate the Elisp form before point (or the region) and COPY the result.
+
+The companion to `ikigai-eval-dwim' for the generated aliases: where that one
+takes an ikigai command string, this takes a call like
+`(ikigai-llm-ask \"summarise this\")'.  The result goes on the kill ring, so
+\[yank] pastes it — rather than being truncated in the echo area, which is what
+happens to anything long enough to be worth keeping.
+
+With a prefix ARG, also insert the result after point.  A string result is
+inserted verbatim, not as a quoted Elisp literal, since the point is usually the
+text itself."
+  (interactive "P")
+  (let* ((form (if (use-region-p)
+                   (car (read-from-string
+                         (buffer-substring-no-properties
+                          (region-beginning) (region-end))))
+                 (ikigai--form-before-point)))
+         (value (eval form t))
+         (out (if (stringp value) value (format "%S" value))))
+    (kill-new out)
+    (when arg
+      (save-excursion (insert "\n" out)))
+    (message "%s%s" out (if arg "" "  (copied)"))
+    out))
+
 ;;; --- generated aliases (named verbs over the manifold) ----------------------
 
 (defcustom ikigai-aliases-file (locate-user-emacs-file "ikigai-aliases.el")
