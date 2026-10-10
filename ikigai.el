@@ -14,6 +14,7 @@
 (require 'org)
 (require 'org-element)
 (require 'json)
+(require 'cl-lib)
 (require 'subr-x)
 (require 'comint)
 (require 'ansi-color)
@@ -406,6 +407,138 @@ text itself."
   "Where `ikigai-refresh-aliases' writes the generated alias definitions."
   :type 'file :group 'ikigai)
 
+(defcustom ikigai-aliases-report-buffer "*ikigai-aliases*"
+  "Buffer where `ikigai-refresh-aliases' lists what it skipped and removed."
+  :type 'string :group 'ikigai)
+
+(defvar ikigai--alias-files nil
+  "Truenames of every alias file `ikigai--load-aliases' has loaded this session.
+Provenance for unbinding: a function is this package's to remove only while its
+definition still comes from one of these files, or from no file at all.")
+
+(defun ikigai--same-file-p (a b)
+  "Non-nil when A and B name one file, ignoring a `.el'/`.elc' difference.
+`load-history' keys a file by the name it was loaded under, which is not
+always its truename (a macOS temporary file loads as /var/... and is truly
+/private/var/...), so `load-history-regexp', which truenames only its
+argument, misses it."
+  (and (equal (file-name-base a) (file-name-base b))
+       (equal (file-name-sans-extension (file-truename a))
+              (file-name-sans-extension (file-truename b)))))
+
+(defun ikigai--file-defuns (file)
+  "The function symbols the last `load' of FILE defined, per `load-history'.
+Emacs replaces a file's `load-history' entry when the file is loaded again, so
+this is exactly what the most recent load of FILE defined: the record of what
+this package put into the running Emacs, kept by Emacs itself.  It also covers
+the `(load ikigai-aliases-file t t)' in an init file, which ran before any
+refresh in this session."
+  (let ((entry (cl-find-if (lambda (e)
+                             (and (stringp (car e))
+                                  (ikigai--same-file-p (car e) file)))
+                           load-history)))
+    (delq nil (mapcar (lambda (e)
+                        (and (consp e) (eq (car e) 'defun) (symbolp (cdr e))
+                             (cdr e)))
+                      (cdr entry)))))
+
+(defun ikigai--parse-skipped (file)
+  "The names the generator refused in FILE, as a list of plists.
+Each is `(:iri IRI :verb VERB :reason REASON :reach FORM)', read from the pair
+of comment lines `aliases_elisp' (ikigai-cli) writes for a refused alias:
+
+  ;; SKIPPED IRI (VERB): REASON.
+  ;; Still reachable as FORM.
+
+The reason is not a fixed vocabulary (a name that does not read back, two IRIs
+on one name, a verb that is not a kernel verb), so it is kept as written."
+  (let (skipped)
+    (with-temp-buffer
+      (insert-file-contents file)
+      (goto-char (point-min))
+      (while (re-search-forward
+              "^;; SKIPPED \\(.*?\\) (\\([^()\n]*\\)): \\(.*?\\)\\.?$" nil t)
+        (let ((iri (match-string 1))
+              (verb (match-string 2))
+              (reason (match-string 3))
+              (reach nil))
+          (forward-line 1)
+          (when (looking-at "^;; Still reachable as \\(.*?\\)\\.?$")
+            (setq reach (match-string 1)))
+          (push (list :iri iri :verb verb :reason reason :reach reach) skipped))))
+    (nreverse skipped)))
+
+(defun ikigai--ours-to-unbind-p (sym)
+  "Non-nil when SYM's current definition is one an alias file gave it.
+After a reload, a function the new file no longer defines has no file at all
+behind it (Emacs dropped the old entry), unless something else defined it
+since: the user's init file, another package.  Then it is not ours, and stays."
+  (and (fboundp sym)
+       (let ((file (symbol-file sym 'defun)))
+         (or (null file)
+             (cl-some (lambda (f) (ikigai--same-file-p file f))
+                      ikigai--alias-files)))))
+
+(defun ikigai--load-aliases (file)
+  "Load the alias FILE, unbind the aliases it dropped, and report both.
+An alias leaves the running Emacs when it leaves the manifold: a function an
+earlier load of FILE defined and this one does not is `fmakunbound', so calling
+it fails in Emacs instead of sending the request anyway.  Only those functions
+are touched; see `ikigai--ours-to-unbind-p' for the guard.
+
+Return a plist:
+  :file     FILE
+  :defined  the function symbols this load defined
+  :skipped  the names the generator refused (see `ikigai--parse-skipped')
+  :removed  the function symbols unbound because they left the manifold"
+  (let* ((truename (file-truename file))
+         (before (ikigai--file-defuns file)))
+    (load file nil t)
+    (cl-pushnew truename ikigai--alias-files :test #'equal)
+    (let* ((defined (ikigai--file-defuns file))
+           (removed (cl-remove-if-not
+                     #'ikigai--ours-to-unbind-p
+                     (cl-set-difference before defined))))
+      (mapc #'fmakunbound removed)
+      (list :file file
+            :defined defined
+            :skipped (ikigai--parse-skipped file)
+            :removed (sort removed #'string<)))))
+
+(defun ikigai--report-aliases (report)
+  "Write REPORT (from `ikigai--load-aliases') to `ikigai-aliases-report-buffer'.
+Return the one-line summary for the echo area."
+  (let ((skipped (plist-get report :skipped))
+        (removed (plist-get report :removed)))
+    (with-current-buffer (get-buffer-create ikigai-aliases-report-buffer)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "ikigai aliases from %s\n\n"
+                        (abbreviate-file-name (plist-get report :file))))
+        (insert (format "%d defined, %d skipped, %d removed.\n"
+                        (length (plist-get report :defined))
+                        (length skipped) (length removed)))
+        (when skipped
+          (insert "\nSkipped (no function; the resource is still reachable):\n")
+          (dolist (s skipped)
+            (insert (format "  %s (%s): %s\n" (plist-get s :iri)
+                            (plist-get s :verb) (plist-get s :reason)))
+            (when (plist-get s :reach)
+              (insert (format "    %s\n" (plist-get s :reach))))))
+        (when removed
+          (insert "\nRemoved (left the manifold since the last load):\n")
+          (dolist (sym removed)
+            (insert (format "  %s\n" sym))))
+        (special-mode)))
+    (format "ikigai: %d aliases loaded from %s%s"
+            (length (plist-get report :defined))
+            (abbreviate-file-name (plist-get report :file))
+            (if (or skipped removed)
+                (format "; %d skipped, %d removed (see %s)"
+                        (length skipped) (length removed)
+                        ikigai-aliases-report-buffer)
+              ""))))
+
 (defun ikigai-refresh-aliases ()
   "Regenerate elisp aliases from the kernel's manifold, then load them.
 
@@ -414,6 +547,12 @@ arguments that resource declares: `(ikigai-fn-toUpper \"hi\")' rather than a
 hand-written wrapper.  They are GENERATED from the live manifold, so they
 cannot drift from what the kernel accepts, and a newly bound endpoint gets a
 function the next time you run this.
+
+A function the previous load defined and this one does not is unbound, so an
+alias leaves with its resource.  A name the generator refused (two IRIs on one
+name, a name that does not read back) gets no function; the echo area counts
+both, and `ikigai-aliases-report-buffer' lists them with the call that still
+reaches each skipped resource.  Return the plist `ikigai--load-aliases' builds.
 
 The set reflects whichever kernel `ikigai-connect' / `ikigai-mounts' point at,
 so running this after changing transport gives you that host's surface.
@@ -426,12 +565,9 @@ Requires `urn:cap:kernel:inspect': reading the manifold is inspection."
       ;; representation happened to end with.
       (unless (string-suffix-p "\n" elisp)
         (insert "\n")))
-    (load ikigai-aliases-file nil t)
-    (message "ikigai: %d aliases loaded from %s"
-             (with-temp-buffer
-               (insert elisp)
-               (count-matches "^(defun " (point-min) (point-max)))
-             (abbreviate-file-name ikigai-aliases-file))))
+    (let ((report (ikigai--load-aliases ikigai-aliases-file)))
+      (message "%s" (ikigai--report-aliases report))
+      report)))
 
 ;;; --- interactive REPL (comint over `ikigai --plain') ------------------------
 

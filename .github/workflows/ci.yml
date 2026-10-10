@@ -1,5 +1,6 @@
 # CI for ikigai-emacs — byte-compile the package (catches undefined functions, bad
-# forms, and the accidental variable that shadows a macro). Org is bundled with Emacs,
+# forms, and the accidental variable that shadows a macro), then run the ERT suite in
+# batch (no kernel: the tests stub `ikigai-eval' with fixture preludes). Org is bundled with Emacs,
 # so `(require 'org)` / `(require 'org-element)` resolve without extra deps.
 name: ci
 
@@ -25,3 +26,8 @@ jobs:
             --eval "(require 'org)" \
             --eval "(require 'org-element)" \
             -f batch-byte-compile ikigai.el
+      - name: ert
+        run: |
+          emacs -Q --batch -L . \
+            -l test/ikigai-test.el \
+            -f ert-run-tests-batch-and-exit

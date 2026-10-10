@@ -70,6 +70,17 @@ Requires the `ikigai` CLI on your `exec-path`. Clone and load:
   scrollback, and a real `ikigai>` prompt; it inherits your `ikigai-mounts`, so the session resolves
   the same composed resources your one-shot commands do. One line per command (the line REPL reads a
   line at a time), so keep multi-line Lisp forms on one line.
+- **`ikigai-refresh-aliases`** — generate one function per resource your capability may invoke
+  (`(ikigai-fn-toUpper "hi")`, `(ikigai-text-head text "n" "2")`) from the kernel's manifold, write
+  them to `ikigai-aliases-file` and load them; `(load ikigai-aliases-file t t)` in your init file
+  brings the last set back without asking the kernel. A refresh keeps the running Emacs in step with
+  the manifold in both directions: a function the previous load defined and this one does not is
+  **unbound** (only functions an alias file defined, and only while their definition still comes from
+  it — your own `defun` of the same name is left alone), and a name the generator **skipped** (two
+  IRIs projecting to one function, a name that does not read back as a symbol) is counted in the
+  message and listed in `*ikigai-aliases*` with the `ikigai-invoke` call that still reaches it. The
+  command returns the same report as a plist (`:defined`, `:skipped`, `:removed`). The day-to-day
+  guide is [The aliases, day to day](https://ikigai-rs.github.io/ikigai-tutorial/beyond/emacs-aliases.html).
 
 ## Building blocks (for your own commands)
 
@@ -78,6 +89,15 @@ Requires the `ikigai` CLI on your `exec-path`. Clone and load:
   `(invoke 'sink "urn:…" …)` so values with spaces are safe.
 - `ikigai-schedule-zoom` — `topic`, `start` (ISO 8601) → the parsed meeting envelope (`join_url`,
   `passcode`, `id`, …).
+
+## Tests
+
+ERT, in batch, with no kernel: `ikigai-eval` is stubbed to return fixture preludes from
+`test/fixtures/`, so nothing starts or reaches an `ikigai`.
+
+```sh
+emacs -Q --batch -L . -l test/ikigai-test.el -f ert-run-tests-batch-and-exit
+```
 
 ## Status
 
