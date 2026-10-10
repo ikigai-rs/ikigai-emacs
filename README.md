@@ -99,6 +99,8 @@ ERT, in batch, with no kernel: `ikigai-eval` is stubbed to return fixture prelud
 emacs -Q --batch -L . -l test/ikigai-test.el -f ert-run-tests-batch-and-exit
 ```
 
+`just gates` runs what CI runs: byte-compile `ikigai.el`, then the suite above.
+
 ## Status
 
 Early, and useful. Working: ad-hoc Zoom scheduling from org (meetings not booked through the
