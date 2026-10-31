@@ -108,4 +108,10 @@ website), and emailing the attendees a calendar invite. Next: contacts autocompl
 addresses; URI completion off the mounted daemon's catalog. Part of the ikigai ecosystem —
 [ikigai-rs.dev](https://ikigai-rs.dev).
 
+## Accessibility
+
+[ACCESSIBILITY.md](ACCESSIBILITY.md) says what this package shows that people read (messages,
+prompts, the report and REPL buffers, the invitation email), the rules that text follows, what is
+tested, the known limitations, and how to report a barrier.
+
 License: MIT OR Apache-2.0
